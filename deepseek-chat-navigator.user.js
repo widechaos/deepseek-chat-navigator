@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DeepSeek Chat Navigator
 // @namespace    https://github.com/widechaos/deepseek-chat-navigator
-// @version      1.2.3
+// @version      1.2.4
 // @description  🚀 智能侧边栏导航，精确定位DeepSeek对话提问和回答！支持开头/结尾双模式定位，长对话浏览神器！
 // @author       widechaos
 // @match        https://chat.deepseek.com/*
@@ -187,6 +187,18 @@
             -webkit-box-orient: vertical;
             word-break: break-word;
             margin-bottom: 4px;
+        }
+
+        /* 特殊处理代码块的显示 */
+        .ds-nav-code-indicator {
+            display: inline-block;
+            background: #f3f4f6;
+            color: #6b7280;
+            font-size: 11px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            margin-right: 4px;
+            border: 1px solid #e5e7eb;
         }
 
         .ds-nav-meta {
@@ -456,7 +468,7 @@
                 // 获取用户消息文本
                 const textElement = container.querySelector('.fbb737a4');
                 if (textElement) {
-                    const text = this.extractText(textElement);
+                    const text = this.cleanHtmlAndExtractText(textElement);
                     if (text && text.length > 0) {
                         const messageId = `ds-user-${Date.now()}-${index}`;
                         container.id = messageId;
@@ -484,7 +496,7 @@
                 let text = '';
 
                 textElements.forEach(el => {
-                    const elText = this.extractText(el);
+                    const elText = this.cleanHtmlAndExtractText(el);
                     if (elText && elText.length > 0) {
                         text += (text ? ' ' : '') + elText;
                     }
@@ -494,7 +506,7 @@
                     // 如果没找到.ds-markdown，尝试其他选择器
                     const altElements = container.querySelectorAll('p, span, div');
                     altElements.forEach(el => {
-                        const elText = el.textContent.trim();
+                        const elText = this.cleanHtmlAndExtractText(el);
                         if (elText && elText.length > 0 && !el.closest('.ds-think-content')) {
                             text += (text ? ' ' : '') + elText;
                         }
@@ -544,13 +556,70 @@
             this.updateNavigation();
         }
 
-        extractText(element) {
+        // 清理HTML标签并提取文本
+        cleanHtmlAndExtractText(element) {
             if (!element) return '';
-            const text = element.textContent || element.innerText || '';
-            return text
+
+            // 克隆元素以避免修改原始DOM
+            const clonedElement = element.cloneNode(true);
+
+            // 移除所有不需要的HTML标签
+            const tagsToRemove = ['script', 'style', 'svg', 'math', 'iframe', 'object', 'embed'];
+            tagsToRemove.forEach(tag => {
+                clonedElement.querySelectorAll(tag).forEach(el => el.remove());
+            });
+
+            // 处理代码块
+            const codeBlocks = clonedElement.querySelectorAll('pre, code');
+            codeBlocks.forEach(code => {
+                // 将代码块替换为简化的指示器
+                const codeText = code.textContent || '';
+                const indicator = document.createElement('span');
+                indicator.className = 'ds-nav-code-indicator';
+                indicator.textContent = '[代码]';
+                indicator.title = codeText.substring(0, 100) + (codeText.length > 100 ? '...' : '');
+                code.parentNode.replaceChild(indicator, code);
+            });
+
+            // 处理链接
+            const links = clonedElement.querySelectorAll('a');
+            links.forEach(link => {
+                const linkText = link.textContent || '';
+                if (linkText.trim()) {
+                    const textNode = document.createTextNode(linkText);
+                    link.parentNode.replaceChild(textNode, link);
+                } else {
+                    link.remove();
+                }
+            });
+
+            // 处理图片
+            const images = clonedElement.querySelectorAll('img');
+            images.forEach(img => {
+                const altText = img.alt || '图片';
+                const textNode = document.createTextNode(`[图片:${altText}]`);
+                img.parentNode.replaceChild(textNode, img);
+            });
+
+            // 获取纯文本并清理
+            let text = clonedElement.textContent || clonedElement.innerText || '';
+
+            // 清理多余空格和换行
+            text = text
                 .replace(/\s+/g, ' ')
-                .trim()
-                .substring(0, 150);
+                .replace(/\[代码\]/g, ' [代码] ')  // 给代码指示器加空格
+                .trim();
+
+            // 截断并返回
+            return text.substring(0, 150);
+        }
+
+        // 转义HTML特殊字符，防止XSS
+        escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         updateNavigation() {
@@ -568,9 +637,9 @@
                         <div class="ds-nav-item-info">
                             <div class="ds-nav-type">
                                 ${msg.type === 'user' ? '👤 提问' : '🤖 回答'}
-                                ${msg.thinkTime ? `<span class="ds-nav-badge">${msg.thinkTime}</span>` : ''}
+                                ${msg.thinkTime ? `<span class="ds-nav-badge">${this.escapeHtml(msg.thinkTime)}</span>` : ''}
                             </div>
-                            <div class="ds-nav-text" title="${msg.text}">${msg.text}</div>
+                            <div class="ds-nav-text" title="${this.escapeHtml(msg.text)}">${this.escapeHtml(msg.text)}</div>
                             <div class="ds-nav-meta">
                                 <span>消息 #${msg.displayIndex}</span>
                                 <span>${msg.timestamp || ''}</span>
