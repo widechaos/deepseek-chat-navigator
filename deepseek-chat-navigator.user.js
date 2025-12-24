@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DeepSeek Chat Navigator
 // @namespace    https://github.com/widechaos/deepseek-chat-navigator
-// @version      1.2.4
+// @version      1.2.5
 // @description  🚀 智能侧边栏导航，精确定位DeepSeek对话提问和回答！支持开头/结尾双模式定位，长对话浏览神器！
 // @author       widechaos
 // @match        https://chat.deepseek.com/*
@@ -307,6 +307,54 @@
             margin-left: 4px;
         }
 
+        .ds-nav-pair-group {
+            margin-bottom: 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .ds-nav-pair-header {
+            background: #f3f4f6;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .ds-nav-pair-number {
+            font-size: 12px;
+            font-weight: 600;
+            color: #1f2937;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .ds-nav-pair-count {
+            background: #3b82f6;
+            color: white;
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 10px;
+        }
+
+        .ds-nav-pair-content {
+            background: white;
+        }
+
+        .ds-nav-pair-item {
+            border-left: none;
+            border-radius: 0;
+            margin-bottom: 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .ds-nav-pair-item:last-child {
+            border-bottom: none;
+        }
+
         @keyframes highlight-pulse {
             0%, 100% {
                 background: #dbeafe;
@@ -375,7 +423,7 @@
             this.navigator = null;
             this.miniToggle = null;
             this.isCollapsed = false;
-            this.messages = [];
+            this.messagePairs = []; // 改为存储对话对
             this.observer = null;
             this.lastScrollTime = 0;
             this.scrollCooldown = 300;
@@ -459,13 +507,14 @@
         }
 
         processMessages(userContainers, assistantContainers) {
-            this.messages = [];
-            let userMessageCount = 0;
-            let assistantMessageCount = 0;
+            // 清空现有的对话对
+            this.messagePairs = [];
+
+            // 将所有消息容器合并并按DOM顺序排序
+            const allContainers = [];
 
             // 处理用户消息
             userContainers.forEach((container, index) => {
-                // 获取用户消息文本
                 const textElement = container.querySelector('.fbb737a4');
                 if (textElement) {
                     const text = this.cleanHtmlAndExtractText(textElement);
@@ -473,19 +522,16 @@
                         const messageId = `ds-user-${Date.now()}-${index}`;
                         container.id = messageId;
 
-                        this.messages.push({
+                        allContainers.push({
                             id: messageId,
                             element: container,
                             text: text,
                             type: 'user',
-                            index: index + 1,
-                            timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })
+                            timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+                            domPosition: this.getElementPosition(container)
                         });
-                        userMessageCount++;
                         console.log(`用户消息 ${index}: ${text.substring(0, 50)}...`);
                     }
-                } else {
-                    console.log(`用户消息容器 ${index} 没有找到文本元素`);
                 }
             });
 
@@ -524,36 +570,61 @@
                     const messageId = `ds-assistant-${Date.now()}-${index}`;
                     container.id = messageId;
 
-                    this.messages.push({
+                    allContainers.push({
                         id: messageId,
                         element: container,
                         text: text,
                         type: 'assistant',
-                        index: userContainers.length + index + 1,
                         thinkTime: thinkTime,
-                        timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })
+                        timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' }),
+                        domPosition: this.getElementPosition(container)
                     });
-                    assistantMessageCount++;
                     console.log(`AI消息 ${index}: ${text.substring(0, 50)}...`);
-                } else {
-                    console.log(`AI消息容器 ${index} 没有找到文本内容`);
                 }
             });
 
-            // 根据DOM位置排序
-            this.messages.sort((a, b) => {
-                const rectA = a.element.getBoundingClientRect();
-                const rectB = b.element.getBoundingClientRect();
-                return rectA.top - rectB.top;
-            });
+            // 按DOM位置排序
+            allContainers.sort((a, b) => a.domPosition - b.domPosition);
 
-            // 更新索引
-            this.messages.forEach((msg, idx) => {
-                msg.displayIndex = idx + 1;
-            });
+            // 分组消息为问答对
+            this.groupMessagesIntoPairs(allContainers);
 
-            console.log(`处理完成，总共 ${this.messages.length} 条消息 (${userMessageCount}用户/${assistantMessageCount}AI)`);
+            console.log(`处理完成，总共 ${this.messagePairs.length} 个问答对`);
             this.updateNavigation();
+        }
+
+        // 获取元素在DOM中的位置
+        getElementPosition(element) {
+            const rect = element.getBoundingClientRect();
+            return rect.top + window.scrollY;
+        }
+
+        // 将消息分组为问答对
+        groupMessagesIntoPairs(allMessages) {
+            let currentPair = null;
+
+            allMessages.forEach((msg, index) => {
+                if (msg.type === 'user') {
+                    // 如果是用户消息，开始一个新的对话对
+                    if (currentPair) {
+                        this.messagePairs.push(currentPair);
+                    }
+                    currentPair = {
+                        pairId: `pair-${this.messagePairs.length + 1}`,
+                        number: this.messagePairs.length + 1,
+                        userMessage: msg,
+                        assistantMessages: []
+                    };
+                } else if (msg.type === 'assistant' && currentPair) {
+                    // 如果是AI消息且当前有对话对，将其添加到当前对话对
+                    currentPair.assistantMessages.push(msg);
+                }
+            });
+
+            // 添加最后一个对话对
+            if (currentPair) {
+                this.messagePairs.push(currentPair);
+            }
         }
 
         // 清理HTML标签并提取文本
@@ -625,44 +696,94 @@
         updateNavigation() {
             const content = this.navigator.querySelector('.ds-nav-content');
 
-            if (this.messages.length === 0) {
+            if (this.messagePairs.length === 0) {
                 content.innerHTML = '<div class="ds-navigator-empty">暂无对话内容</div>';
                 return;
             }
 
-            content.innerHTML = this.messages.map(msg => `
-                <div class="ds-nav-item ${msg.type}" data-id="${msg.id}">
-                    <div class="ds-nav-item-header">
-                        <div class="ds-nav-icon ${msg.type}"></div>
-                        <div class="ds-nav-item-info">
-                            <div class="ds-nav-type">
-                                ${msg.type === 'user' ? '👤 提问' : '🤖 回答'}
-                                ${msg.thinkTime ? `<span class="ds-nav-badge">${this.escapeHtml(msg.thinkTime)}</span>` : ''}
-                            </div>
-                            <div class="ds-nav-text" title="${this.escapeHtml(msg.text)}">${this.escapeHtml(msg.text)}</div>
-                            <div class="ds-nav-meta">
-                                <span>消息 #${msg.displayIndex}</span>
-                                <span>${msg.timestamp || ''}</span>
+            // 生成对话对HTML
+            content.innerHTML = this.messagePairs.map(pair => {
+                const pairItems = [];
+
+                // 用户消息
+                pairItems.push(`
+                    <div class="ds-nav-item user ds-nav-pair-item" data-id="${pair.userMessage.id}">
+                        <div class="ds-nav-item-header">
+                            <div class="ds-nav-icon user"></div>
+                            <div class="ds-nav-item-info">
+                                <div class="ds-nav-type">
+                                    👤 提问
+                                </div>
+                                <div class="ds-nav-text" title="${this.escapeHtml(pair.userMessage.text)}">
+                                    ${this.escapeHtml(pair.userMessage.text)}
+                                </div>
+                                <div class="ds-nav-meta">
+                                    <span>${pair.userMessage.timestamp || ''}</span>
+                                </div>
                             </div>
                         </div>
-                        <div class="ds-nav-counter">${msg.displayIndex}</div>
+                        <div class="ds-nav-buttons">
+                            <button class="ds-nav-button ds-nav-button-start" data-id="${pair.userMessage.id}" data-position="start">
+                                <span>▲</span> 定位到开头
+                            </button>
+                            <button class="ds-nav-button ds-nav-button-end" data-id="${pair.userMessage.id}" data-position="end">
+                                <span>▼</span> 定位到结尾
+                            </button>
+                        </div>
                     </div>
-                    <div class="ds-nav-buttons">
-                        <button class="ds-nav-button ds-nav-button-start" data-id="${msg.id}" data-position="start">
-                            <span>▲</span> 定位到开头
-                        </button>
-                        <button class="ds-nav-button ds-nav-button-end" data-id="${msg.id}" data-position="end">
-                            <span>▼</span> 定位到结尾
-                        </button>
+                `);
+
+                // AI回复消息
+                pair.assistantMessages.forEach((assistantMsg, index) => {
+                    pairItems.push(`
+                        <div class="ds-nav-item assistant ds-nav-pair-item" data-id="${assistantMsg.id}">
+                            <div class="ds-nav-item-header">
+                                <div class="ds-nav-icon assistant"></div>
+                                <div class="ds-nav-item-info">
+                                    <div class="ds-nav-type">
+                                        🤖 回答
+                                        ${assistantMsg.thinkTime ? `<span class="ds-nav-badge">${this.escapeHtml(assistantMsg.thinkTime)}</span>` : ''}
+                                    </div>
+                                    <div class="ds-nav-text" title="${this.escapeHtml(assistantMsg.text)}">
+                                        ${this.escapeHtml(assistantMsg.text)}
+                                    </div>
+                                    <div class="ds-nav-meta">
+                                        <span>${assistantMsg.timestamp || ''}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="ds-nav-buttons">
+                                <button class="ds-nav-button ds-nav-button-start" data-id="${assistantMsg.id}" data-position="start">
+                                    <span>▲</span> 定位到开头
+                                </button>
+                                <button class="ds-nav-button ds-nav-button-end" data-id="${assistantMsg.id}" data-position="end">
+                                    <span>▼</span> 定位到结尾
+                                </button>
+                            </div>
+                        </div>
+                    `);
+                });
+
+                return `
+                    <div class="ds-nav-pair-group" data-pair-id="${pair.pairId}">
+                        <div class="ds-nav-pair-header">
+                            <div class="ds-nav-pair-number">
+                                对话 #${pair.number}
+                                <span class="ds-nav-pair-count">${1 + pair.assistantMessages.length}条</span>
+                            </div>
+                        </div>
+                        <div class="ds-nav-pair-content">
+                            ${pairItems.join('')}
+                        </div>
                     </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
 
             // 更新标题
             const title = this.navigator.querySelector('.ds-nav-title');
-            const userCount = this.messages.filter(m => m.type === 'user').length;
-            const assistantCount = this.messages.filter(m => m.type === 'assistant').length;
-            title.textContent = `对话导航 (${userCount}问/${assistantCount}答)`;
+            const totalMessages = this.messagePairs.reduce((sum, pair) =>
+                sum + 1 + pair.assistantMessages.length, 0);
+            title.textContent = `对话导航 (${this.messagePairs.length}个问答，${totalMessages}条消息)`;
         }
 
         bindEvents() {
@@ -707,23 +828,39 @@
 
             console.log(`尝试滚动到消息: ${messageId}, 位置: ${position}`);
 
-            // 先尝试从缓存中查找
-            let message = this.messages.find(m => m.id === messageId);
+            // 在所有对话对中查找消息
+            let targetMessage = null;
+            let targetPair = null;
 
-            // 如果缓存中没有，尝试在DOM中重新查找
-            if (!message) {
+            for (const pair of this.messagePairs) {
+                if (pair.userMessage.id === messageId) {
+                    targetMessage = pair.userMessage;
+                    targetPair = pair;
+                    break;
+                }
+                for (const assistantMsg of pair.assistantMessages) {
+                    if (assistantMsg.id === messageId) {
+                        targetMessage = assistantMsg;
+                        targetPair = pair;
+                        break;
+                    }
+                }
+                if (targetMessage) break;
+            }
+
+            // 如果在缓存中没有找到，尝试在DOM中重新查找
+            if (!targetMessage) {
                 const element = document.getElementById(messageId);
                 if (element) {
                     console.log(`从DOM重新找到元素: ${messageId}`);
-                    message = {
+                    targetMessage = {
                         id: messageId,
-                        element: element,
-                        type: element.classList.contains('user') ? 'user' : 'assistant'
+                        element: element
                     };
                 }
             }
 
-            if (!message || !message.element) {
+            if (!targetMessage || !targetMessage.element) {
                 console.error(`未找到消息元素: ${messageId}`);
                 // 尝试重新扫描
                 this.scanMessages();
@@ -739,19 +876,34 @@
             const navItem = this.navigator.querySelector(`[data-id="${messageId}"]`);
             if (navItem) {
                 navItem.classList.add('ds-nav-active');
+
+                // 高亮整个对话对
+                const pairGroup = navItem.closest('.ds-nav-pair-group');
+                if (pairGroup) {
+                    pairGroup.style.border = '1px solid #3b82f6';
+                    pairGroup.style.boxShadow = '0 0 0 1px rgba(59, 130, 246, 0.1)';
+
+                    // 移除其他对话对的高亮
+                    document.querySelectorAll('.ds-nav-pair-group').forEach(group => {
+                        if (group !== pairGroup) {
+                            group.style.border = '1px solid #e5e7eb';
+                            group.style.boxShadow = 'none';
+                        }
+                    });
+                }
+
                 // 确保导航项在导航栏中可见
                 navItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
 
             // 确保元素在DOM中
-            if (!document.body.contains(message.element)) {
+            if (!document.body.contains(targetMessage.element)) {
                 console.error(`消息元素不在DOM中: ${messageId}`);
                 this.scanMessages();
                 return;
             }
 
-            // 直接使用 element.scrollIntoView 方法 - 这是最简单可靠的方法
-            // 根据 position 参数选择不同的 block 选项
+            // 直接使用 element.scrollIntoView 方法
             const scrollOptions = {
                 behavior: 'smooth',
                 block: position === 'start' ? 'start' : 'end',
@@ -759,13 +911,13 @@
             };
 
             console.log(`使用 scrollIntoView 滚动到元素: ${position}, 选项:`, scrollOptions);
-            message.element.scrollIntoView(scrollOptions);
+            targetMessage.element.scrollIntoView(scrollOptions);
 
             // 添加临时高亮效果
-            message.element.classList.add('ds-nav-highlight');
+            targetMessage.element.classList.add('ds-nav-highlight');
             setTimeout(() => {
-                if (message.element) {
-                    message.element.classList.remove('ds-nav-highlight');
+                if (targetMessage.element) {
+                    targetMessage.element.classList.remove('ds-nav-highlight');
                 }
             }, 2000);
         }
@@ -812,11 +964,17 @@
         }
 
         highlightVisibleMessage() {
-            if (this.messages.length === 0) return;
+            if (this.messagePairs.length === 0) return;
 
             // 移除所有高亮
             this.navigator.querySelectorAll('.ds-nav-active').forEach(el => {
                 el.classList.remove('ds-nav-active');
+            });
+
+            // 重置对话对边框
+            document.querySelectorAll('.ds-nav-pair-group').forEach(group => {
+                group.style.border = '1px solid #e5e7eb';
+                group.style.boxShadow = 'none';
             });
 
             const viewportHeight = window.innerHeight;
@@ -824,10 +982,13 @@
 
             let closestMessage = null;
             let closestDistance = Infinity;
+            let closestPair = null;
 
-            this.messages.forEach(msg => {
-                if (msg.element && document.body.contains(msg.element)) {
-                    const rect = msg.element.getBoundingClientRect();
+            // 在所有消息中查找最接近视图中点的消息
+            this.messagePairs.forEach(pair => {
+                // 检查用户消息
+                if (pair.userMessage.element && document.body.contains(pair.userMessage.element)) {
+                    const rect = pair.userMessage.element.getBoundingClientRect();
                     if (rect.height > 0) {
                         const elementTop = window.scrollY + rect.top;
                         const elementMiddle = elementTop + (rect.height / 2);
@@ -835,16 +996,42 @@
 
                         if (distance < closestDistance) {
                             closestDistance = distance;
-                            closestMessage = msg;
+                            closestMessage = pair.userMessage;
+                            closestPair = pair;
                         }
                     }
                 }
+
+                // 检查AI消息
+                pair.assistantMessages.forEach(assistantMsg => {
+                    if (assistantMsg.element && document.body.contains(assistantMsg.element)) {
+                        const rect = assistantMsg.element.getBoundingClientRect();
+                        if (rect.height > 0) {
+                            const elementTop = window.scrollY + rect.top;
+                            const elementMiddle = elementTop + (rect.height / 2);
+                            const distance = Math.abs(viewportMiddle - elementMiddle);
+
+                            if (distance < closestDistance) {
+                                closestDistance = distance;
+                                closestMessage = assistantMsg;
+                                closestPair = pair;
+                            }
+                        }
+                    }
+                });
             });
 
             if (closestMessage && closestDistance < viewportHeight) {
                 const navItem = this.navigator.querySelector(`[data-id="${closestMessage.id}"]`);
                 if (navItem) {
                     navItem.classList.add('ds-nav-active');
+
+                    // 高亮整个对话对
+                    const pairGroup = navItem.closest('.ds-nav-pair-group');
+                    if (pairGroup) {
+                        pairGroup.style.border = '1px solid #3b82f6';
+                        pairGroup.style.boxShadow = '0 0 0 1px rgba(59, 130, 246, 0.1)';
+                    }
                 }
             }
         }
