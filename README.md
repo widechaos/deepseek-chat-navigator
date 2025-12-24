@@ -37,16 +37,13 @@
 ![定位功能](screenshots/screenshot-2.png)
 *双按钮精准定位*
 
-![移动端](screenshots/screenshot-3.png)
-*移动设备适配*
-
 ---
 
 ## 🚀 安装指南
 
 ### 方式一：Greasy Fork（推荐）
 1. 安装用户脚本管理器：[Tampermonkey](https://www.tampermonkey.net/) 或 [Violentmonkey](https://violentmonkey.github.io/)
-2. 访问 [Greasy Fork页面](https://greasyfork.org/zh-CN/scripts/your-script-id)
+2. 访问 [Greasy Fork页面](https://greasyfork.org/zh-CN/scripts/560039-deepseek-chat-navigator)
 3. 点击"安装此脚本"
 4. 确认安装
 
