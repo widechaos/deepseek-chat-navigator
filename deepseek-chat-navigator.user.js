@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DeepSeek Chat Navigator
 // @namespace    https://github.com/widechaos/deepseek-chat-navigator
-// @version      1.3.0
+// @version      1.4.0
 // @description  🚀 智能侧边栏导航，精确定位DeepSeek对话提问和回答！支持开头/结尾双模式定位，长对话浏览神器！
 // @author       widechaos
 // @match        https://chat.deepseek.com/*
@@ -346,6 +346,51 @@
             border-bottom: none;
         }
 
+        .ds-nav-keywords {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 6px;
+        }
+
+        .ds-nav-keyword {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #e0f2fe;
+            color: #0369a1;
+            font-size: 11px;
+            border-radius: 12px;
+            font-weight: 500;
+        }
+
+        .ds-nav-keyword.category {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .ds-nav-keyword.code {
+            background: #f3e8ff;
+            color: #7c3aed;
+        }
+
+        .ds-nav-keyword.task {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .ds-nav-summary {
+            font-size: 12px;
+            color: #4b5563;
+            line-height: 1.4;
+            margin-top: 4px;
+            font-style: italic;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
         .ds-nav-loader {
             padding: 10px;
             text-align: center;
@@ -456,23 +501,45 @@
             this.lastScrollTime = 0;
             this.scrollCooldown = 300;
             this.isScanning = false;
-            this.visiblePairs = new Set(); // 跟踪可见的对话对
-            this.batchSize = 5; // 每批处理的对话对数量
-            this.renderedCount = 0; // 已渲染的对话对数量
-            this.scanProgress = 0; // 扫描进度
+            this.batchSize = 5;
+            this.renderedCount = 0;
+            this.scanProgress = 0;
+
+            // 中文停用词表
+            this.stopWords = new Set([
+                '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你',
+                '会', '着', '没有', '看', '好', '自己', '这', '那', '但', '什么', '我们', '吗', '可以', '这', '那', '啊', '哦', '嗯',
+                'the', 'and', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'am', 'are', 'was', 'were', 'be', 'been',
+                'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'shall', 'should', 'may', 'might', 'must', 'can', 'could'
+            ]);
+
+            // 编程语言关键词
+            this.codeKeywords = new Set([
+                'javascript', 'js', 'python', 'py', 'java', 'c++', 'cpp', 'c#', 'csharp', 'php', 'ruby', 'go', 'golang',
+                'rust', 'swift', 'kotlin', 'typescript', 'ts', 'html', 'css', 'sql', 'bash', 'shell', 'json', 'xml',
+                'react', 'vue', 'angular', 'node', 'express', 'django', 'flask', 'spring', 'laravel'
+            ]);
+
+            // 任务类型关键词
+            this.taskKeywords = new Set([
+                '修复', '修复bug', 'bug', '错误', '异常', '报错', '问题', '解决', '实现', '编写', '开发', '创建', '添加',
+                '修改', '优化', '改进', '重构', '调试', '测试', '部署', '安装', '配置', '设置', '更新', '升级',
+                'fix', 'bug', 'error', 'issue', 'problem', 'solve', 'implement', 'write', 'develop', 'create', 'add',
+                'modify', 'optimize', 'improve', 'refactor', 'debug', 'test', 'deploy', 'install', 'configure', 'setup', 'update', 'upgrade'
+            ]);
+
             this.init();
         }
 
         init() {
             console.log('DeepSeek Navigator 初始化...');
 
-            // 延迟创建界面，让主线程先处理页面渲染
+            // 延迟创建界面
             setTimeout(() => {
                 this.createNavigator();
                 this.addMiniToggle();
                 this.bindEvents();
 
-                // 使用requestIdleCallback或setTimeout延迟扫描
                 if ('requestIdleCallback' in window) {
                     requestIdleCallback(() => {
                         this.setupObserver();
@@ -488,11 +555,9 @@
         }
 
         createNavigator() {
-            // 创建侧边栏容器
             this.navigator = document.createElement('div');
             this.navigator.className = 'ds-navigator';
 
-            // 侧边栏内容
             this.navigator.innerHTML = `
                 <div class="ds-nav-header">
                     <h3 class="ds-nav-title">对话导航</h3>
@@ -544,22 +609,19 @@
             this.isScanning = true;
             console.log('开始扫描消息...');
 
-            // 查找用户消息
             const userMessages = document.querySelectorAll('div._9663006');
-            console.log(`找到用户消息容器: ${userMessages.length}`);
-
-            // 查找AI回复消息
             const assistantMessages = document.querySelectorAll('div._4f9bf79');
+
+            console.log(`找到用户消息容器: ${userMessages.length}`);
             console.log(`找到AI消息容器: ${assistantMessages.length}`);
 
-            // 分批处理消息，避免阻塞主线程
             this.processMessagesInBatches(userMessages, assistantMessages);
         }
 
         async processMessagesInBatches(userContainers, assistantContainers) {
             const allContainers = [];
 
-            // 收集所有消息容器
+            // 收集用户消息
             userContainers.forEach((container, index) => {
                 const textElement = container.querySelector('.fbb737a4');
                 if (textElement) {
@@ -576,6 +638,7 @@
                 }
             });
 
+            // 收集AI回复消息
             assistantContainers.forEach((container, index) => {
                 const textElements = container.querySelectorAll('.ds-markdown');
                 let text = '';
@@ -627,20 +690,158 @@
 
             console.log(`处理完成，总共 ${this.messagePairs.length} 个问答对`);
 
-            // 显示初始加载进度
+            // 为每个对话对提取关键词和摘要
+            this.processKeywordsAndSummaries();
+
             this.updateProgress(30);
 
-            // 延迟渲染第一批
             setTimeout(() => {
                 this.renderedCount = 0;
                 this.renderInitialBatch();
                 this.updateProgress(100);
 
-                // 监听导航栏滚动，实现懒加载
                 this.setupLazyLoad();
-
                 this.isScanning = false;
             }, 100);
+        }
+
+        // 提取关键词和摘要
+        processKeywordsAndSummaries() {
+            this.messagePairs.forEach(pair => {
+                // 合并用户问题和所有AI回答的文本
+                const combinedText = [
+                    pair.userMessage.text,
+                    ...pair.assistantMessages.map(msg => msg.text)
+                ].join(' ');
+
+                // 提取关键词
+                pair.keywords = this.extractKeywords(combinedText);
+
+                // 提取摘要（使用AI回答的第一句话）
+                if (pair.assistantMessages.length > 0 && pair.assistantMessages[0].text) {
+                    pair.summary = this.extractSummary(pair.assistantMessages[0].text);
+                }
+
+                // 提取任务类型
+                pair.taskType = this.extractTaskType(pair.userMessage.text);
+
+                // 提取代码语言
+                pair.codeLanguage = this.extractCodeLanguage(pair.userMessage.text);
+            });
+        }
+
+        // 提取关键词（使用TF-IDF简化版）
+        extractKeywords(text, maxKeywords = 5) {
+            if (!text || text.length < 10) return [];
+
+            // 分词（简化版，按空格和标点分割）
+            const words = text.toLowerCase()
+                .replace(/[^\w\u4e00-\u9fa5\s]/g, ' ') // 移除标点，保留中文和英文单词
+                .split(/\s+/)
+                .filter(word => word.length > 1); // 过滤掉单字符
+
+            // 统计词频
+            const wordFreq = {};
+            words.forEach(word => {
+                if (!this.stopWords.has(word) && word.length > 1) {
+                    wordFreq[word] = (wordFreq[word] || 0) + 1;
+                }
+            });
+
+            // 按词频排序
+            const sortedWords = Object.entries(wordFreq)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, maxKeywords * 2); // 多取一些，后面会过滤
+
+            // 过滤掉太常见的词
+            const keywords = sortedWords
+                .filter(([word, freq]) => {
+                    // 过滤停用词
+                    if (this.stopWords.has(word)) return false;
+
+                    // 只保留词频大于等于2的关键词，但如果是代码关键词或任务关键词则保留
+                    if (freq >= 2) return true;
+                    if (this.codeKeywords.has(word)) return true;
+                    if (this.taskKeywords.has(word)) return true;
+
+                    return false;
+                })
+                .slice(0, maxKeywords)
+                .map(([word]) => word);
+
+            return keywords;
+        }
+
+        // 提取摘要（使用AI回答的第一句话）
+        extractSummary(text) {
+            if (!text) return '';
+
+            // 找到第一个句子的结束位置
+            const sentenceEnd = text.search(/[。.!?？！\n]/);
+            let firstSentence = text;
+
+            if (sentenceEnd > 20) { // 至少20个字符才截取
+                firstSentence = text.substring(0, sentenceEnd + 1);
+            }
+
+            // 限制长度
+            if (firstSentence.length > 80) {
+                firstSentence = firstSentence.substring(0, 77) + '...';
+            }
+
+            return firstSentence.trim();
+        }
+
+        // 提取任务类型
+        extractTaskType(text) {
+            const lowerText = text.toLowerCase();
+            for (const taskWord of this.taskKeywords) {
+                if (lowerText.includes(taskWord.toLowerCase())) {
+                    return taskWord;
+                }
+            }
+            return '';
+        }
+
+        // 提取代码语言
+        extractCodeLanguage(text) {
+            const lowerText = text.toLowerCase();
+            for (const lang of this.codeKeywords) {
+                if (lowerText.includes(lang.toLowerCase())) {
+                    return lang;
+                }
+            }
+
+            // 检查常见的文件扩展名
+            const fileExtensions = {
+                '.js': 'javascript',
+                '.jsx': 'javascript',
+                '.ts': 'typescript',
+                '.tsx': 'typescript',
+                '.py': 'python',
+                '.java': 'java',
+                '.cpp': 'c++',
+                '.c': 'c',
+                '.cs': 'c#',
+                '.php': 'php',
+                '.go': 'go',
+                '.rs': 'rust',
+                '.swift': 'swift',
+                '.kt': 'kotlin',
+                '.html': 'html',
+                '.css': 'css',
+                '.sql': 'sql',
+                '.json': 'json',
+                '.xml': 'xml'
+            };
+
+            for (const [ext, lang] of Object.entries(fileExtensions)) {
+                if (lowerText.includes(ext)) {
+                    return lang;
+                }
+            }
+
+            return '';
         }
 
         // 渲染初始批次
@@ -741,6 +942,42 @@
                 `);
             });
 
+            // 构建关键词标签
+            let keywordTags = '';
+            if (pair.keywords && pair.keywords.length > 0) {
+                // 首先添加任务类型标签（如果有）
+                if (pair.taskType) {
+                    keywordTags += `<span class="ds-nav-keyword task">${this.escapeHtml(pair.taskType)}</span>`;
+                }
+
+                // 然后添加代码语言标签（如果有）
+                if (pair.codeLanguage) {
+                    keywordTags += `<span class="ds-nav-keyword code">${this.escapeHtml(pair.codeLanguage)}</span>`;
+                }
+
+                // 添加其他关键词
+                pair.keywords.forEach(keyword => {
+                    // 跳过已经显示的任务类型和代码语言
+                    if (keyword !== pair.taskType && keyword !== pair.codeLanguage) {
+                        // 给一些特定的关键词添加分类样式
+                        let className = '';
+                        if (this.codeKeywords.has(keyword.toLowerCase())) {
+                            className = 'code';
+                        } else if (this.taskKeywords.has(keyword.toLowerCase())) {
+                            className = 'task';
+                        }
+
+                        keywordTags += `<span class="ds-nav-keyword ${className}">${this.escapeHtml(keyword)}</span>`;
+                    }
+                });
+            }
+
+            // 构建摘要
+            let summaryHtml = '';
+            if (pair.summary && pair.summary.length > 0) {
+                summaryHtml = `<div class="ds-nav-summary" title="${this.escapeHtml(pair.summary)}">${this.escapeHtml(pair.summary)}</div>`;
+            }
+
             const pairHtml = `
                 <div class="ds-nav-pair-group" data-pair-id="${pair.pairId}" data-pair-index="${index}">
                     <div class="ds-nav-pair-header">
@@ -749,6 +986,8 @@
                             <span class="ds-nav-pair-count">${1 + pair.assistantMessages.length}条</span>
                         </div>
                     </div>
+                    ${keywordTags ? `<div class="ds-nav-keywords">${keywordTags}</div>` : ''}
+                    ${summaryHtml}
                     <div class="ds-nav-pair-content">
                         ${pairItems.join('')}
                     </div>
@@ -756,7 +995,6 @@
             `;
 
             content.insertAdjacentHTML('beforeend', pairHtml);
-            this.visiblePairs.add(index);
         }
 
         // 添加"加载更多"按钮
@@ -804,11 +1042,9 @@
             if (!content) return;
 
             content.addEventListener('scroll', () => {
-                // 检查是否需要加载更多
                 const scrollPosition = content.scrollTop + content.clientHeight;
                 const scrollHeight = content.scrollHeight;
 
-                // 如果滚动到底部附近，自动加载更多
                 if (scrollHeight - scrollPosition < 200 && this.renderedCount < this.messagePairs.length) {
                     this.loadMorePairs();
                 }
@@ -821,7 +1057,6 @@
             if (progressBar) {
                 progressBar.style.width = `${percent}%`;
 
-                // 完成时隐藏进度条
                 if (percent >= 100) {
                     setTimeout(() => {
                         progressBar.style.opacity = '0';
@@ -915,7 +1150,7 @@
                 .replace(/\[代码\]/g, ' [代码] ')
                 .trim();
 
-            return text.substring(0, 150);
+            return text;
         }
 
         escapeHtml(text) {
@@ -1066,7 +1301,6 @@
                 if (shouldUpdate) {
                     console.log('检测到新消息，重新扫描...');
 
-                    // 延迟扫描新消息
                     setTimeout(() => {
                         this.scanMessages();
                     }, 300);
