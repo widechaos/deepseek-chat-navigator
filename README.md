@@ -1,7 +1,7 @@
 # DeepSeek Chat Navigator 🚀
 
 [![GitHub license](https://img.shields.io/github/license/widechaos/deepseek-chat-navigator)](https://github.com/widechaos/deepseek-chat-navigator/blob/main/LICENSE)
-[![Greasy Fork](https://img.shields.io/badge/GreasyFork-Install-green)](https://greasyfork.org/zh-CN/scripts/your-script-id)
+[![Greasy Fork](https://img.shields.io/badge/GreasyFork-Install-green)](https://greasyfork.org/zh-CN/scripts/560039-deepseek-chat-navigator)
 [![GitHub stars](https://img.shields.io/github/stars/widechaos/deepseek-chat-navigator)](https://github.com/widechaos/deepseek-chat-navigator/stargazers)
 
 ✨ **智能DeepSeek对话导航器** - 为DeepSeek AI聊天添加强大的侧边栏导航功能，让长对话浏览变得轻而易举！
