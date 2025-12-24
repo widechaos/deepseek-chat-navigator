@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         DeepSeek Chat Navigator
 // @namespace    https://github.com/widechaos/deepseek-chat-navigator
-// @version      1.2.0
+// @version      1.2.3
 // @description  🚀 智能侧边栏导航，精确定位DeepSeek对话提问和回答！支持开头/结尾双模式定位，长对话浏览神器！
 // @author       widechaos
 // @match        https://chat.deepseek.com/*
@@ -106,6 +106,7 @@
             display: flex;
             flex-direction: column;
             gap: 8px;
+            cursor: pointer;
         }
 
         .ds-nav-item:hover {
@@ -294,21 +295,6 @@
             margin-left: 4px;
         }
 
-        .ds-nav-scroll-indicator {
-            position: absolute;
-            width: 100%;
-            height: 2px;
-            background: #3b82f6;
-            left: 0;
-            z-index: 1;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }
-
-        .ds-nav-scroll-indicator.show {
-            opacity: 1;
-        }
-
         @keyframes highlight-pulse {
             0%, 100% {
                 background: #dbeafe;
@@ -370,27 +356,6 @@
             color: #9ca3af;
             font-size: 14px;
         }
-
-        .ds-nav-preview {
-            position: fixed;
-            right: 380px;
-            background: rgba(255, 255, 255, 0.95);
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 12px;
-            max-width: 300px;
-            font-size: 13px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            z-index: 9990;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-            pointer-events: none;
-        }
-
-        .ds-nav-preview.show {
-            opacity: 1;
-            pointer-events: auto;
-        }
     `);
 
     class DeepSeekNavigator {
@@ -400,21 +365,21 @@
             this.isCollapsed = false;
             this.messages = [];
             this.observer = null;
-            this.previewElement = null;
             this.lastScrollTime = 0;
-            this.scrollCooldown = 300; // 滚动冷却时间（毫秒）
+            this.scrollCooldown = 300;
             this.init();
         }
 
         init() {
+            console.log('DeepSeek Navigator 初始化...');
             // 等待页面加载完成
             setTimeout(() => {
                 this.createNavigator();
-                this.createPreview();
                 this.setupObserver();
                 this.addMiniToggle();
                 this.scanMessages();
-            }, 2000);
+                this.bindEvents();
+            }, 1000);
         }
 
         createNavigator() {
@@ -436,19 +401,7 @@
             `;
 
             document.body.appendChild(this.navigator);
-
-            // 绑定折叠/展开按钮事件
-            const toggleBtn = this.navigator.querySelector('.ds-nav-toggle');
-            toggleBtn.addEventListener('click', () => this.toggleCollapse());
-
-            // 初始扫描消息
-            this.scanMessages();
-        }
-
-        createPreview() {
-            this.previewElement = document.createElement('div');
-            this.previewElement.className = 'ds-nav-preview';
-            document.body.appendChild(this.previewElement);
+            console.log('侧边栏创建完成');
         }
 
         addMiniToggle() {
@@ -480,66 +433,53 @@
         }
 
         scanMessages() {
-            // 查找所有的消息容器
-            const userSelectors = [
-                'div._9663006',
-                '[data-um-id]',
-                'div[class*="ds-message"]:has(> .fbb737a4)'
-            ];
+            console.log('正在扫描消息...');
 
-            const assistantSelectors = [
-                'div._4f9bf79',
-                'div[class*="_4f9bf79"][class*="_43c05b5"]',
-                'div.ds-message:has(> .ds-markdown)'
-            ];
+            // 查找用户消息 - 根据你提供的HTML结构
+            const userMessages = document.querySelectorAll('div._9663006');
+            console.log(`找到用户消息容器: ${userMessages.length}`);
 
-            let userMessages = [];
-            for (const selector of userSelectors) {
-                const found = document.querySelectorAll(selector);
-                if (found.length > 0) {
-                    userMessages = found;
-                    break;
-                }
-            }
-
-            let assistantMessages = [];
-            for (const selector of assistantSelectors) {
-                const found = document.querySelectorAll(selector);
-                if (found.length > 0) {
-                    assistantMessages = found;
-                    break;
-                }
-            }
+            // 查找AI回复消息
+            const assistantMessages = document.querySelectorAll('div._4f9bf79');
+            console.log(`找到AI消息容器: ${assistantMessages.length}`);
 
             this.processMessages(userMessages, assistantMessages);
         }
 
         processMessages(userContainers, assistantContainers) {
             this.messages = [];
+            let userMessageCount = 0;
+            let assistantMessageCount = 0;
 
             // 处理用户消息
             userContainers.forEach((container, index) => {
+                // 获取用户消息文本
                 const textElement = container.querySelector('.fbb737a4');
                 if (textElement) {
                     const text = this.extractText(textElement);
                     if (text && text.length > 0) {
-                        const messageId = `ds-user-msg-${Date.now()}-${index}`;
-                        if (!container.id) container.id = messageId;
+                        const messageId = `ds-user-${Date.now()}-${index}`;
+                        container.id = messageId;
 
                         this.messages.push({
-                            id: container.id,
+                            id: messageId,
                             element: container,
                             text: text,
                             type: 'user',
                             index: index + 1,
                             timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })
                         });
+                        userMessageCount++;
+                        console.log(`用户消息 ${index}: ${text.substring(0, 50)}...`);
                     }
+                } else {
+                    console.log(`用户消息容器 ${index} 没有找到文本元素`);
                 }
             });
 
             // 处理AI回复消息
             assistantContainers.forEach((container, index) => {
+                // 获取AI回复文本
                 const textElements = container.querySelectorAll('.ds-markdown');
                 let text = '';
 
@@ -550,7 +490,8 @@
                     }
                 });
 
-                if (!text) {
+                if (!text || text.trim().length === 0) {
+                    // 如果没找到.ds-markdown，尝试其他选择器
                     const altElements = container.querySelectorAll('p, span, div');
                     altElements.forEach(el => {
                         const elText = el.textContent.trim();
@@ -560,18 +501,19 @@
                     });
                 }
 
-                if (text && text.length > 0) {
+                if (text && text.trim().length > 0) {
+                    // 提取思考时间
                     let thinkTime = '';
                     const thinkElement = container.querySelector('._5255ff8');
                     if (thinkElement) {
                         thinkTime = thinkElement.textContent.trim();
                     }
 
-                    const messageId = `ds-assistant-msg-${Date.now()}-${index}`;
-                    if (!container.id) container.id = messageId;
+                    const messageId = `ds-assistant-${Date.now()}-${index}`;
+                    container.id = messageId;
 
                     this.messages.push({
-                        id: container.id,
+                        id: messageId,
                         element: container,
                         text: text,
                         type: 'assistant',
@@ -579,6 +521,10 @@
                         thinkTime: thinkTime,
                         timestamp: new Date().toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })
                     });
+                    assistantMessageCount++;
+                    console.log(`AI消息 ${index}: ${text.substring(0, 50)}...`);
+                } else {
+                    console.log(`AI消息容器 ${index} 没有找到文本内容`);
                 }
             });
 
@@ -594,11 +540,14 @@
                 msg.displayIndex = idx + 1;
             });
 
+            console.log(`处理完成，总共 ${this.messages.length} 条消息 (${userMessageCount}用户/${assistantMessageCount}AI)`);
             this.updateNavigation();
         }
 
         extractText(element) {
-            return element.textContent
+            if (!element) return '';
+            const text = element.textContent || element.innerText || '';
+            return text
                 .replace(/\s+/g, ' ')
                 .trim()
                 .substring(0, 150);
@@ -645,25 +594,37 @@
             const userCount = this.messages.filter(m => m.type === 'user').length;
             const assistantCount = this.messages.filter(m => m.type === 'assistant').length;
             title.textContent = `对话导航 (${userCount}问/${assistantCount}答)`;
+        }
 
-            // 绑定按钮点击事件
-            content.querySelectorAll('.ds-nav-button').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const messageId = button.dataset.id;
-                    const position = button.dataset.position;
-                    this.scrollToMessage(messageId, position);
-                });
+        bindEvents() {
+            // 绑定折叠按钮
+            const toggleBtn = this.navigator.querySelector('.ds-nav-toggle');
+            toggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleCollapse();
             });
 
-            // 绑定导航项点击事件（默认定位到开头）
-            content.querySelectorAll('.ds-nav-item').forEach(item => {
-                item.addEventListener('click', (e) => {
-                    if (!e.target.closest('.ds-nav-button')) {
-                        const messageId = item.dataset.id;
-                        this.scrollToMessage(messageId, 'start');
-                    }
-                });
+            // 使用事件委托绑定所有按钮和导航项点击
+            this.navigator.addEventListener('click', (e) => {
+                e.stopPropagation();
+
+                // 处理按钮点击
+                const button = e.target.closest('.ds-nav-button');
+                if (button) {
+                    const messageId = button.dataset.id;
+                    const position = button.dataset.position;
+                    console.log(`点击按钮: ${position} 定位到 ${messageId}`);
+                    this.scrollToMessage(messageId, position);
+                    return;
+                }
+
+                // 处理导航项点击（默认定位到开头）
+                const navItem = e.target.closest('.ds-nav-item');
+                if (navItem) {
+                    const messageId = navItem.dataset.id;
+                    console.log(`点击导航项: 定位到 ${messageId} 的开头`);
+                    this.scrollToMessage(messageId, 'start');
+                }
             });
         }
 
@@ -675,79 +636,69 @@
 
             this.lastScrollTime = now;
 
-            const message = this.messages.find(m => m.id === messageId);
-            if (message && message.element) {
-                // 移除之前的高亮
-                document.querySelectorAll('.ds-nav-active').forEach(el => {
-                    el.classList.remove('ds-nav-active');
-                });
+            console.log(`尝试滚动到消息: ${messageId}, 位置: ${position}`);
 
-                // 添加当前高亮
-                const navItem = this.navigator.querySelector(`[data-id="${messageId}"]`);
-                if (navItem) {
-                    navItem.classList.add('ds-nav-active');
-                    navItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            // 先尝试从缓存中查找
+            let message = this.messages.find(m => m.id === messageId);
+
+            // 如果缓存中没有，尝试在DOM中重新查找
+            if (!message) {
+                const element = document.getElementById(messageId);
+                if (element) {
+                    console.log(`从DOM重新找到元素: ${messageId}`);
+                    message = {
+                        id: messageId,
+                        element: element,
+                        type: element.classList.contains('user') ? 'user' : 'assistant'
+                    };
                 }
-
-                // 计算滚动位置
-                const element = message.element;
-                const rect = element.getBoundingClientRect();
-                const scrollY = window.scrollY;
-
-                let targetScrollY;
-
-                if (position === 'start') {
-                    // 滚动到元素顶部稍微靠下的位置，给一些上下文
-                    targetScrollY = scrollY + rect.top - (window.innerHeight * 0.15);
-                } else if (position === 'end') {
-                    // 滚动到元素底部
-                    targetScrollY = scrollY + rect.bottom - (window.innerHeight * 0.15);
-                } else {
-                    // 默认滚动到中间
-                    targetScrollY = scrollY + rect.top - (window.innerHeight / 2) + (rect.height / 2);
-                }
-
-                // 平滑滚动
-                window.scrollTo({
-                    top: targetScrollY,
-                    behavior: 'smooth'
-                });
-
-                // 添加临时高亮效果
-                element.classList.add('ds-nav-highlight');
-                setTimeout(() => {
-                    element.classList.remove('ds-nav-highlight');
-                }, 2000);
-
-                // 显示滚动指示器
-                this.showScrollIndicator(position);
-            }
-        }
-
-        showScrollIndicator(position) {
-            // 创建或显示滚动指示器
-            let indicator = document.querySelector('.ds-nav-scroll-indicator');
-            if (!indicator) {
-                indicator = document.createElement('div');
-                indicator.className = 'ds-nav-scroll-indicator';
-                document.body.appendChild(indicator);
             }
 
-            // 设置位置
-            const navRect = this.navigator.getBoundingClientRect();
-            indicator.style.top = (navRect.top + navRect.height - 2) + 'px';
-            indicator.style.width = navRect.width + 'px';
+            if (!message || !message.element) {
+                console.error(`未找到消息元素: ${messageId}`);
+                // 尝试重新扫描
+                this.scanMessages();
+                return;
+            }
 
-            // 设置颜色
-            indicator.style.background = position === 'start' ? '#10b981' : '#8b5cf6';
+            // 移除之前的高亮
+            document.querySelectorAll('.ds-nav-active').forEach(el => {
+                el.classList.remove('ds-nav-active');
+            });
 
-            // 显示指示器
-            indicator.classList.add('show');
+            // 添加当前高亮
+            const navItem = this.navigator.querySelector(`[data-id="${messageId}"]`);
+            if (navItem) {
+                navItem.classList.add('ds-nav-active');
+                // 确保导航项在导航栏中可见
+                navItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
 
-            // 3秒后隐藏
+            // 确保元素在DOM中
+            if (!document.body.contains(message.element)) {
+                console.error(`消息元素不在DOM中: ${messageId}`);
+                this.scanMessages();
+                return;
+            }
+
+            // 直接使用 element.scrollIntoView 方法 - 这是最简单可靠的方法
+            // 根据 position 参数选择不同的 block 选项
+            const scrollOptions = {
+                behavior: 'smooth',
+                block: position === 'start' ? 'start' : 'end',
+                inline: 'nearest'
+            };
+
+            console.log(`使用 scrollIntoView 滚动到元素: ${position}, 选项:`, scrollOptions);
+            message.element.scrollIntoView(scrollOptions);
+
+            // 添加临时高亮效果
+            message.element.classList.add('ds-nav-highlight');
             setTimeout(() => {
-                indicator.classList.remove('show');
-            }, 3000);
+                if (message.element) {
+                    message.element.classList.remove('ds-nav-highlight');
+                }
+            }, 2000);
         }
 
         setupObserver() {
@@ -758,22 +709,15 @@
                     if (mutation.type === 'childList') {
                         mutation.addedNodes.forEach(node => {
                             if (node.nodeType === 1) {
-                                const isUserMsg = node.matches && (
+                                // 检查是否是消息相关元素
+                                if (node.matches && (
                                     node.matches('div._9663006') ||
-                                    node.matches('[data-um-id]') ||
-                                    node.querySelector('.fbb737a4')
-                                );
-
-                                const isAssistantMsg = node.matches && (
                                     node.matches('div._4f9bf79') ||
+                                    node.matches('.ds-message') ||
+                                    node.querySelector('[data-um-id]') ||
+                                    node.querySelector('.fbb737a4') ||
                                     node.querySelector('.ds-markdown')
-                                );
-
-                                if (isUserMsg || isAssistantMsg ||
-                                    (node.querySelector && (
-                                        node.querySelector('.fbb737a4') ||
-                                        node.querySelector('.ds-markdown')
-                                    ))) {
+                                )) {
                                     shouldUpdate = true;
                                 }
                             }
@@ -782,6 +726,7 @@
                 });
 
                 if (shouldUpdate) {
+                    console.log('检测到新消息，重新扫描...');
                     setTimeout(() => this.scanMessages(), 500);
                 }
             });
@@ -791,7 +736,10 @@
                 subtree: true
             });
 
-            window.addEventListener('scroll', () => this.highlightVisibleMessage());
+            // 监听滚动，更新当前高亮的消息
+            window.addEventListener('scroll', () => {
+                this.highlightVisibleMessage();
+            });
         }
 
         highlightVisibleMessage() {
@@ -809,7 +757,7 @@
             let closestDistance = Infinity;
 
             this.messages.forEach(msg => {
-                if (msg.element) {
+                if (msg.element && document.body.contains(msg.element)) {
                     const rect = msg.element.getBoundingClientRect();
                     if (rect.height > 0) {
                         const elementTop = window.scrollY + rect.top;
@@ -828,12 +776,6 @@
                 const navItem = this.navigator.querySelector(`[data-id="${closestMessage.id}"]`);
                 if (navItem) {
                     navItem.classList.add('ds-nav-active');
-
-                    const navRect = navItem.getBoundingClientRect();
-                    const navContainer = this.navigator.querySelector('.ds-nav-content');
-                    if (navRect.top < 0 || navRect.bottom > navContainer.clientHeight) {
-                        navItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    }
                 }
             }
         }
@@ -842,34 +784,23 @@
             if (this.observer) this.observer.disconnect();
             if (this.navigator) this.navigator.remove();
             if (this.miniToggle) this.miniToggle.remove();
-            if (this.previewElement) this.previewElement.remove();
         }
     }
 
     // 启动导航器
     let navigator = null;
 
-    // 等待页面加载完成后初始化
     function initNavigator() {
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => {
+                console.log('DOMContentLoaded 事件触发，初始化导航器');
                 navigator = new DeepSeekNavigator();
             });
         } else {
+            console.log('DOM 已加载，直接初始化导航器');
             navigator = new DeepSeekNavigator();
         }
     }
-
-    // 页面切换时重新初始化
-    let lastUrl = location.href;
-    new MutationObserver(() => {
-        const url = location.href;
-        if (url !== lastUrl) {
-            lastUrl = url;
-            if (navigator) navigator.destroy();
-            setTimeout(() => navigator = new DeepSeekNavigator(), 1000);
-        }
-    }).observe(document, { subtree: true, childList: true });
 
     // 初始化
     initNavigator();
